@@ -73,7 +73,6 @@ export default function ForgotPasswordPage() {
   const handleResetPassword = async (e) => {
     e.preventDefault();
 
-    // Method specific validations
     if (method === "otp" && !otp) {
       setMessage("OTP is required");
       setErrorType("otp");
@@ -86,7 +85,6 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    // Shared validations
     if (password.length < 6) {
       setMessage("Password must be at least 6 characters");
       setErrorType("password");
@@ -104,6 +102,33 @@ export default function ForgotPasswordPage() {
     setErrorType("");
 
     try {
+      let newEncryptedMasterKey = null;
+
+      if (method === "recoveryCode") {
+        // Fetch the user's encrypted master key so we can re-wrap it
+        const mkRes = await fetch("/api/auth/master-key-for-reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier }),
+        });
+        if (mkRes.ok) {
+          const mkData = await mkRes.json();
+          if (mkData.encryptedMasterKey && mkData.userId) {
+            try {
+              const { rewrapMasterKey } = await import('@/lib/utils/clientCrypto');
+              newEncryptedMasterKey = await rewrapMasterKey(
+                mkData.encryptedMasterKey,
+                recoveryCode,
+                mkData.userId,
+                password
+              );
+            } catch {
+              // Recovery code couldn't decrypt the master key — proceed without re-wrap
+              // Server will reject if recovery code is wrong anyway
+            }
+          }
+        }
+      }
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -112,7 +137,8 @@ export default function ForgotPasswordPage() {
           password,
           otp: method === "otp" ? otp : undefined,
           recoveryCode: method === "recoveryCode" ? recoveryCode : undefined,
-          method
+          method,
+          newEncryptedMasterKey,
         }),
       });
 
@@ -259,6 +285,12 @@ export default function ForgotPasswordPage() {
                     disabled={loading}
                     maxLength={6}
                   />
+                </div>
+              )}
+
+              {method === "otp" && step === 2 && (
+                <div className="p-3 rounded-lg text-sm bg-yellow-900/30 text-yellow-400 border border-yellow-800">
+                  ⚠️ Resetting via OTP will permanently delete all your encrypted notes. Use a recovery code to keep them.
                 </div>
               )}
 

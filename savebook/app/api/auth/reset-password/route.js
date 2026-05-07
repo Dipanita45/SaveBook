@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import dbConnect from "@/lib/db/mongodb.js";
 import User from "@/lib/models/User.js";
+import Notes from "@/lib/models/Notes.js";
 
 export async function POST(req) {
   try {
     await dbConnect();
 
-    const { identifier, password, otp, recoveryCode, method } = await req.json();
+    const { identifier, password, otp, recoveryCode, method, newEncryptedMasterKey } = await req.json();
 
     // Validate generic inputs
     if (!identifier || !password || !method) {
@@ -36,7 +37,7 @@ export async function POST(req) {
     // Email is typically for OTP, Username/Email for Recovery Codes
     const user = await User.findOne({
       $or: [{ email: identifier }, { username: identifier }],
-    }).select("+password +resetPasswordOtp +resetPasswordOtpExpires +recoveryCodes");
+    }).select("+password +resetPasswordOtp +resetPasswordOtpExpires +recoveryCodes +encryptedMasterKey");
 
     if (!user) {
       return NextResponse.json(
@@ -72,6 +73,10 @@ export async function POST(req) {
       user.resetPasswordOtp = undefined;
       user.resetPasswordOtpExpires = undefined;
 
+      // OTP reset cannot re-wrap master key (no old key available) — delete all notes
+      await Notes.deleteMany({ user: user._id });
+      user.encryptedMasterKey = null;
+
     } else if (method === "recoveryCode") {
       // Verify recovery code
       let matchedIndex = -1;
@@ -97,6 +102,11 @@ export async function POST(req) {
 
       // Mark recovery code as used
       user.recoveryCodes[matchedIndex].used = true;
+
+      // Re-wrap master key with new password (client sent the new encrypted blob)
+      if (newEncryptedMasterKey) {
+        user.encryptedMasterKey = newEncryptedMasterKey;
+      }
     } else {
       return NextResponse.json(
         { message: "Invalid reset method" },
@@ -104,8 +114,8 @@ export async function POST(req) {
       );
     }
 
-    // Update password
-
+    // Update password (pre-save hook hashes it)
+    user.password = password;
     await user.save();
 
     return NextResponse.json({

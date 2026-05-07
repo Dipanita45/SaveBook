@@ -57,6 +57,11 @@ const UserSchema = new Schema({
         }
     ],
 
+    // Encrypted master key blob: "{iv}:{ciphertext}" wrapped with password-derived key
+    encryptedMasterKey: {
+        type: String,
+        default: null,
+    },
 
 });
 

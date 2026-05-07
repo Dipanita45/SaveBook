@@ -6,7 +6,7 @@ export async function POST(request) {
   try {
     await dbConnect();
 
-    const { username, email, password } = await request.json();
+    const { username, email, password, encryptedMasterKey } = await request.json();
 
     // ✅ Input validation
     if (
@@ -36,15 +36,16 @@ export async function POST(request) {
       );
     }
 
-    // ✅ Create user
-    await User.create({
+    // ✅ Create user — return userId so client can re-wrap master key with correct salt
+    const newUser = await User.create({
       username,
       email,
-      password
+      password,
+      encryptedMasterKey: encryptedMasterKey || null,
     });
 
     return NextResponse.json(
-      { success: true, message: "Account created successfully" },
+      { success: true, message: "Account created successfully", userId: newUser._id.toString() },
       { status: 201 }
     );
   } catch (error) {
