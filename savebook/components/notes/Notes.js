@@ -162,7 +162,7 @@ export default function Notes() {
         }, 1000); // 1s debounce
 
         return () => clearTimeout(timer);
-    }, [note.etitle, note.edescription, note.etag, isEditModalOpen, note.id, editNote, existingImages, isAutoSaving]);
+    }, [note.etitle, note.edescription, note.etag, isEditModalOpen, note.id, editNote, existingImages]);
 
     // Add new images
     const handleNewImageChange = (e) => {

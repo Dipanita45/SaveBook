@@ -1,5 +1,5 @@
 "use client"
-import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthContext from './authContext';
 
@@ -21,15 +21,19 @@ const AuthProvider = ({ children }) => {
   const masterKeyRef = useRef(null);
   const router = useRouter();
 
-  const clearAuthTokenCookie = useCallback(async () => {
+  useEffect(() => {
+    checkUserAuthentication();
+  }, []);
+
+  const clearAuthTokenCookie = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'GET', credentials: 'include' });
     } catch {
       // Local auth state is still invalid if the in-memory key is gone.
     }
-  }, []);
+  };
 
-  const checkUserAuthentication = useCallback(async () => {
+  const checkUserAuthentication = async () => {
     try {
       setLoading(true);
       const response = await fetch('/api/auth/user', {
@@ -65,11 +69,7 @@ const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  }, [clearAuthTokenCookie]);
-
-  useEffect(() => {
-    checkUserAuthentication();
-  }, [checkUserAuthentication]);
+  };
 
   const login = async (username, password) => {
     try {
@@ -165,7 +165,7 @@ const AuthProvider = ({ children }) => {
     }
   };
 
-  const getMasterKey = useCallback(() => masterKeyRef.current, []);
+  const getMasterKey = () => masterKeyRef.current;
 
   return (
     <AuthContext.Provider value={{
