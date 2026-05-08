@@ -100,6 +100,13 @@ export async function POST(req) {
         );
       }
 
+      if (user.encryptedMasterKey && !newEncryptedMasterKey) {
+        return NextResponse.json(
+          { message: "Could not preserve encrypted notes. Password was not changed." },
+          { status: 400 }
+        );
+      }
+
       // Mark recovery code as used
       user.recoveryCodes[matchedIndex].used = true;
 

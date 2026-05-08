@@ -54,11 +54,9 @@ export default function NoteItem(props) {
     const copyLink = (e) => {
         e.stopPropagation();
         const key = shareKeyHex || note?._shareKeyHex;
-        if (!key) {
-            toast.error("Share key not available. Try toggling share off and on again.");
-            return;
-        }
-        const url = `${window.location.origin}/share/${note._id}#${key}`;
+        const url = key
+            ? `${window.location.origin}/share/${note._id}#${encodeURIComponent(key)}`
+            : `${window.location.origin}/share/${note._id}`;
         navigator.clipboard.writeText(url);
         setCopied(true);
         toast.success("Link copied to clipboard! 📋");

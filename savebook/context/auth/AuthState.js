@@ -85,20 +85,29 @@ const AuthProvider = ({ children }) => {
       if (data.success) {
         const userId = data.data.user.id;
 
-        if (data.data.encryptedMasterKey) {
-          const { decryptMasterKey } = await getCrypto();
-          masterKeyRef.current = await decryptMasterKey(data.data.encryptedMasterKey, password, userId);
-        } else {
-          const { generateMasterKey, encryptMasterKey } = await getCrypto();
-          const newMasterKey = await generateMasterKey();
-          const encryptedBlob = await encryptMasterKey(newMasterKey, password, userId);
-          masterKeyRef.current = newMasterKey;
-          await fetch('/api/auth/master-key', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-            body: JSON.stringify({ encryptedMasterKey: encryptedBlob }),
-          });
+        try {
+          if (data.data.encryptedMasterKey) {
+            const { decryptMasterKey } = await getCrypto();
+            masterKeyRef.current = await decryptMasterKey(data.data.encryptedMasterKey, password, userId);
+          } else {
+            const { generateMasterKey, encryptMasterKey } = await getCrypto();
+            const newMasterKey = await generateMasterKey();
+            const encryptedBlob = await encryptMasterKey(newMasterKey, password, userId);
+            masterKeyRef.current = newMasterKey;
+            await fetch('/api/auth/master-key', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ encryptedMasterKey: encryptedBlob }),
+            });
+          }
+        } catch {
+          await clearAuthTokenCookie();
+          masterKeyRef.current = null;
+          setUser(null);
+          setIsAuthenticated(false);
+          setNeedsRelogin(false);
+          return { success: false, message: 'Unable to unlock your encrypted notes with this password' };
         }
 
         setUser(data.data.user);

@@ -123,8 +123,10 @@ export default function ForgotPasswordPage() {
                 password
               );
             } catch {
-              // Recovery code couldn't decrypt the master key — proceed without re-wrap
-              // Server will reject if recovery code is wrong anyway
+              setMessage("Recovery code could not unlock your encrypted notes. Your password was not changed.");
+              setErrorType("recoveryCode");
+              setLoading(false);
+              return;
             }
           }
         }
