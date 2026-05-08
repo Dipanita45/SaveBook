@@ -15,6 +15,7 @@ jobs:
           script: |
             const issue_number = context.issue.number;
 
+            // Apply label to every newly opened issue
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
