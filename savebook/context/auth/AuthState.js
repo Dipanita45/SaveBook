@@ -1,5 +1,5 @@
 "use client"
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthContext from './authContext';
 
@@ -21,11 +21,15 @@ const AuthProvider = ({ children }) => {
   const masterKeyRef = useRef(null);
   const router = useRouter();
 
-  useEffect(() => {
-    checkUserAuthentication();
+  const clearAuthTokenCookie = useCallback(async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'GET', credentials: 'include' });
+    } catch {
+      // Local auth state is still invalid if the in-memory key is gone.
+    }
   }, []);
 
-  const checkUserAuthentication = async () => {
+  const checkUserAuthentication = useCallback(async () => {
     try {
       setLoading(true);
       const response = await fetch('/api/auth/user', {
@@ -35,10 +39,18 @@ const AuthProvider = ({ children }) => {
       });
       const data = await response.json();
       if (data.success) {
+        if (!masterKeyRef.current) {
+          await clearAuthTokenCookie();
+          masterKeyRef.current = null;
+          setUser(null);
+          setIsAuthenticated(false);
+          setNeedsRelogin(true);
+          return;
+        }
+
         setUser(data.user);
         setIsAuthenticated(true);
-        // Master key is lost on page refresh by design — flag it so UI can warn
-        if (!masterKeyRef.current) setNeedsRelogin(true);
+        setNeedsRelogin(false);
       } else {
         setIsAuthenticated(false);
         setUser(null);
@@ -53,7 +65,11 @@ const AuthProvider = ({ children }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [clearAuthTokenCookie]);
+
+  useEffect(() => {
+    checkUserAuthentication();
+  }, [checkUserAuthentication]);
 
   const login = async (username, password) => {
     try {
@@ -139,7 +155,7 @@ const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
-      await fetch('/api/auth/logout', { method: 'GET', credentials: 'include' });
+      await clearAuthTokenCookie();
     } finally {
       masterKeyRef.current = null;
       setUser(null);
@@ -149,7 +165,7 @@ const AuthProvider = ({ children }) => {
     }
   };
 
-  const getMasterKey = () => masterKeyRef.current;
+  const getMasterKey = useCallback(() => masterKeyRef.current, []);
 
   return (
     <AuthContext.Provider value={{

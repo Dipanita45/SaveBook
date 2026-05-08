@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -80,9 +81,9 @@ export default function SharedNotePage() {
                     </div>
                     <h1 className="text-2xl font-bold mb-2">Unavailable</h1>
                     <p className="text-gray-400 mb-6">{error}</p>
-                    <a href="/" className="inline-block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                    <Link href="/" className="inline-block px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
                         Go Home
-                    </a>
+                    </Link>
                 </div>
             </div>
         );
@@ -152,12 +153,12 @@ export default function SharedNotePage() {
 
                 <div className="mt-8 text-center">
                     <p className="text-gray-500 mb-4">Content shared via SaveBook</p>
-                    <a href="/" className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors">
+                    <Link href="/" className="inline-flex items-center gap-2 text-blue-400 hover:text-blue-300 transition-colors">
                         <span>Create your own notes</span>
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
                         </svg>
-                    </a>
+                    </Link>
                 </div>
             </div>
         </div>

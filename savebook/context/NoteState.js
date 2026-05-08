@@ -16,7 +16,7 @@ const NoteState = (props) => {
   const [notes, setNotes] = useState([])
   const { getMasterKey } = useAuth()
 
-  const encryptNote = async (title, description) => {
+  const encryptNote = useCallback(async (title, description) => {
     const key = getMasterKey()
     if (!key) return { title, description }
     const { encryptWithKey } = await getCrypto()
@@ -24,9 +24,9 @@ const NoteState = (props) => {
       title: await encryptWithKey(title, key),
       description: await encryptWithKey(description, key),
     }
-  }
+  }, [getMasterKey])
 
-  const decryptNote = async (note) => {
+  const decryptNote = useCallback(async (note) => {
     const key = getMasterKey()
     if (!key) return note
     try {
@@ -39,7 +39,7 @@ const NoteState = (props) => {
     } catch {
       return note
     }
-  }
+  }, [getMasterKey])
 
   const getNotes = useCallback(async () => {
     try {
@@ -55,7 +55,7 @@ const NoteState = (props) => {
     } catch (error) {
       console.error('Error fetching notes:', error)
     }
-  }, [getMasterKey])
+  }, [decryptNote])
 
   const addNote = useCallback(async (title, description, tag, images = [], audio = null) => {
     try {
@@ -73,7 +73,7 @@ const NoteState = (props) => {
       console.error('Error adding note:', error)
       getNotes()
     }
-  }, [getNotes, getMasterKey])
+  }, [decryptNote, encryptNote, getNotes])
 
   // Bug 6 (stale closure) is a pre-existing issue — not reverted here
   const deleteNote = useCallback(async (id) => {
@@ -88,7 +88,7 @@ const NoteState = (props) => {
       console.error('Error deleting note:', error)
       getNotes()
     }
-  }, [notes, getNotes])
+  }, [getNotes])
 
   const editNote = useCallback(async (id, title, description, tag, images = [], audio = null) => {
     try {
@@ -108,7 +108,7 @@ const NoteState = (props) => {
       getNotes()
       throw error
     }
-  }, [getNotes, getMasterKey])
+  }, [decryptNote, encryptNote, getNotes])
 
   // Fix Bug 7: removed dead `body` variable
   const toggleShare = useCallback(async (id) => {
@@ -151,7 +151,7 @@ const NoteState = (props) => {
       console.error('Error toggling share:', error)
       throw error
     }
-  }, [notes, getMasterKey])
+  }, [notes])
 
   return (
     <noteContext.Provider value={{ notes, setNotes, addNote, deleteNote, editNote, getNotes, toggleShare }}>

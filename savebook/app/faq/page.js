@@ -144,7 +144,7 @@ export default function FAQPage() {
             >
               GitHub repository
             </a>
-            . We're happy to help!
+            . We&apos;re happy to help!
           </p>
         </motion.div>
       </div>

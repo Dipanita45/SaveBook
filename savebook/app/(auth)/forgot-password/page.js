@@ -366,7 +366,7 @@ export default function ForgotPasswordPage() {
                     className="text-sm text-gray-400 hover:text-white transition-colors"
                     disabled={loading}
                   >
-                    Didn't receive code? Resend
+                    Didn&apos;t receive code? Resend
                   </button>
                 </div>
               )}

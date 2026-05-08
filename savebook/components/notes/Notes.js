@@ -162,7 +162,7 @@ export default function Notes() {
         }, 1000); // 1s debounce
 
         return () => clearTimeout(timer);
-    }, [note.etitle, note.edescription, note.etag, isEditModalOpen, note.id, editNote, existingImages]);
+    }, [note.etitle, note.edescription, note.etag, isEditModalOpen, note.id, editNote, existingImages, isAutoSaving]);
 
     // Add new images
     const handleNewImageChange = (e) => {
@@ -200,8 +200,8 @@ export default function Notes() {
         );
     }
 
-    // Don't render notes if not authenticated (will be redirected)
-    if (!isAuthenticated) {
+    // Redirect normal unauthenticated users, but keep the refresh re-login prompt visible.
+    if (!isAuthenticated && !needsRelogin) {
         return (
             <Suspense fallback={null}>
                 <NavigationHandler isAuthenticated={isAuthenticated} loading={loading} />
