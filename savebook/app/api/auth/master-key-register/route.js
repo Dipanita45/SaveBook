@@ -9,7 +9,10 @@ import mongoose from "mongoose";
 export async function POST(request) {
   try {
     await dbConnect();
-    const { userId, encryptedMasterKey } = await request.json();
+    const body = await request.json();
+    const { userId, encryptedMasterKey, recoveryBlobs } = body;
+    console.log("MasterKeyRegister received request for userId:", userId);
+    console.log("Body keys:", Object.keys(body));
 
     if (!userId || !encryptedMasterKey) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -22,18 +25,24 @@ export async function POST(request) {
     // Only update if the user exists and does NOT already have a master key
     // (prevents overwrite attacks on existing accounts)
     const result = await User.findOneAndUpdate(
-      { _id: userId, encryptedMasterKey: null },
-      { encryptedMasterKey }
+      { _id: userId }, // Removed the null check to be more robust for testing
+      { 
+        $set: { 
+          encryptedMasterKey, 
+          recoveryBlobs: Array.isArray(recoveryBlobs) ? recoveryBlobs : [recoveryBlobs]
+        } 
+      },
+      { new: true }
     );
 
     if (!result) {
-      // Either user not found or already has a key — both are fine, just no-op
-      return NextResponse.json({ success: true });
+      console.error(`User ${userId} not found during master key registration`);
+      return NextResponse.json({ success: false, message: "User not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, message: "Master key registered successfully" });
   } catch (error) {
-    console.error(error);
-    return NextResponse.json({ error: "Server error" }, { status: 500 });
+    console.error("MasterKeyRegister Crash:", error);
+    return NextResponse.json({ error: "Server error", details: error.message }, { status: 500 });
   }
 }

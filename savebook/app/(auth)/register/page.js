@@ -30,6 +30,7 @@ function SignupForm() {
     confirmPassword: "",
   });
   const [errors, setErrors] = useState({});
+  const [recoveryCodes, setRecoveryCodes] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -79,7 +80,11 @@ function SignupForm() {
 
       if (result.success) {
         toast.success("Account created successfully!");
-        router.push("/login");
+        if (result.recoveryCodes) {
+          setRecoveryCodes(result.recoveryCodes);
+        } else {
+          router.push("/login");
+        }
       } else {
         toast.error(result.message || "Registration failed");
       }
@@ -89,6 +94,33 @@ function SignupForm() {
       setIsLoading(false);
     }
   };
+
+  if (recoveryCodes) {
+    return (
+      <div className="space-y-6 text-center">
+        <div className="rounded-2xl bg-blue-900/30 p-6 border border-blue-800">
+          <h3 className="text-xl font-bold text-white mb-4">Save Your Recovery Codes</h3>
+          <p className="text-sm text-gray-300 mb-6">
+            These codes are the ONLY way to recover your encrypted notes if you forget your password. 
+            Store them somewhere safe (like a password manager).
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-6">
+            {recoveryCodes.map((code, index) => (
+              <div key={index} className="bg-gray-900 p-3 rounded-lg font-mono text-sm text-blue-400 border border-gray-700">
+                {code}
+              </div>
+            ))}
+          </div>
+          <button 
+            onClick={() => router.push("/login")}
+            className="site-button w-full"
+          >
+            I've saved them, go to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (isAuthenticated === undefined) {
     return <SignupFormSkeleton />;

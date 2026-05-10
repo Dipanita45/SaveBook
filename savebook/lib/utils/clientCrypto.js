@@ -9,7 +9,7 @@ const PBKDF2_ITERATIONS = 100000;
 const KEY_LENGTH = 256;
 
 // Derive an AES-GCM key from a password + salt using PBKDF2
-async function deriveKeyFromPassword(password, salt) {
+export async function deriveKeyFromPassword(password, salt) {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
@@ -33,15 +33,15 @@ export async function generateMasterKey() {
 }
 
 // Export a CryptoKey to raw hex string
-async function exportKey(cryptoKey) {
+export async function exportKey(cryptoKey) {
   const raw = await crypto.subtle.exportKey("raw", cryptoKey);
   return Array.from(new Uint8Array(raw)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // Import a raw hex string back to CryptoKey
-async function importKey(hex) {
+export async function importKey(hex) {
   const raw = new Uint8Array(hex.match(/.{2}/g).map((b) => parseInt(b, 16)));
-  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: KEY_LENGTH }, false, ["encrypt", "decrypt"]);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM", length: KEY_LENGTH }, true, ["encrypt", "decrypt"]);
 }
 
 // Encrypt a plaintext string with a CryptoKey, returns hex string "{iv}:{ciphertext}"

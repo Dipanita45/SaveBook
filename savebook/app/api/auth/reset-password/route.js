@@ -100,9 +100,11 @@ export async function POST(req) {
         );
       }
 
+      // For recovery code method, we should ONLY proceed if we have a new encrypted master key
+      // This prevents accidental note deletion when recovery codes are used
       if (user.encryptedMasterKey && !newEncryptedMasterKey) {
         return NextResponse.json(
-          { message: "Could not preserve encrypted notes. Password was not changed." },
+          { message: "Failed to preserve encrypted notes. Please try again or contact support." },
           { status: 400 }
         );
       }

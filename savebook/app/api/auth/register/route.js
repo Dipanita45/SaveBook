@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import User from "@/lib/models/User";
 import dbConnect from "@/lib/db/mongodb";
+import { generateRecoveryCodes } from "@/lib/utils/recoveryCodes";
 
 export async function POST(request) {
   try {
@@ -36,16 +37,25 @@ export async function POST(request) {
       );
     }
 
+    // ✅ Generate recovery codes
+    const { plainCodes, hashedCodes } = generateRecoveryCodes();
+
     // ✅ Create user — return userId so client can re-wrap master key with correct salt
     const newUser = await User.create({
       username,
       email,
       password,
       encryptedMasterKey: encryptedMasterKey || null,
+      recoveryCodes: hashedCodes
     });
 
     return NextResponse.json(
-      { success: true, message: "Account created successfully", userId: newUser._id.toString() },
+      { 
+        success: true, 
+        message: "Account created successfully", 
+        userId: newUser._id.toString(),
+        recoveryCodes: plainCodes // Return plain codes to the client
+      },
       { status: 201 }
     );
   } catch (error) {

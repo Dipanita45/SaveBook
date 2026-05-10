@@ -142,18 +142,41 @@ const AuthProvider = ({ children }) => {
 
       // Step 2: now we have the real userId — generate and wrap master key with correct salt
       const userId = data.userId;
+      const recoveryCode = data.recoveryCodes[0]; // Use the first recovery code to wrap the key
       const { generateMasterKey, encryptMasterKey } = await getCrypto();
       const newMasterKey = await generateMasterKey();
+      
       const encryptedBlob = await encryptMasterKey(newMasterKey, password, userId);
+      
+      console.log("Registering master key for userId:", userId);
+      
+      // Add a small delay to ensure DB consistency
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      // Step 3: save the correctly-salted encrypted master key
-      await fetch('/api/auth/master-key-register', {
+      // Step 2b: Wrap master key with EACH recovery code (Sequentially for stability)
+      const recoveryEncryptedBlobs = [];
+      for (const code of data.recoveryCodes) {
+        const blob = await encryptMasterKey(newMasterKey, code, userId);
+        recoveryEncryptedBlobs.push(blob);
+      }
+
+      // Step 3: save the correctly-salted encrypted master key and recovery-wrapped versions
+      const mkRegRes = await fetch('/api/auth/master-key-register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId, encryptedMasterKey: encryptedBlob }),
+        body: JSON.stringify({ 
+          userId, 
+          encryptedMasterKey: encryptedBlob,
+          recoveryBlobs: recoveryEncryptedBlobs 
+        }),
       });
 
-      return { success: true, message: data.message };
+      if (!mkRegRes.ok) {
+        const errorData = await mkRegRes.json().catch(() => ({}));
+        throw new Error(`Failed to save recovery backup keys: ${errorData.details || mkRegRes.statusText}`);
+      }
+
+      return { success: true, message: data.message, recoveryCodes: data.recoveryCodes };
     } catch (err) {
       console.error('Registration error:', err);
       return { success: false, message: err?.message || 'An error occurred during registration' };
