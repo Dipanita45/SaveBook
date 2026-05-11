@@ -44,6 +44,12 @@ const NotesSchema = new Schema({
     type: Date,
     default: Date.now,
   },
+
+  // Encrypted with a random share key embedded in the public share URL fragment
+  shareEncryptedContent: {
+    type: String,
+    default: null,
+  },
 });
 
 export default mongoose.models.Notes ||

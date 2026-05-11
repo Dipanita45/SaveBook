@@ -15,6 +15,7 @@ export default function NoteItem(props) {
     const [previewImage, setPreviewImage] = useState(null);
     const [copied, setCopied] = useState(false);
     const [sharing, setSharing] = useState(false);
+    const [shareKeyHex, setShareKeyHex] = useState(note?._shareKeyHex || null);
 
     const handleDelete = async () => {
         setIsDeleting(true);
@@ -36,7 +37,12 @@ export default function NoteItem(props) {
         e.stopPropagation();
         setSharing(true);
         try {
-            await toggleShare(note._id);
+            const result = await toggleShare(note._id);
+            if (result?.shareKeyHex) {
+                setShareKeyHex(result.shareKeyHex);
+            } else {
+                setShareKeyHex(null);
+            }
             toast.success(note.isPublic ? "Note is now private 🔒" : "Note is now public 🌍");
         } catch (error) {
             toast.error("Failed to update share status");
@@ -47,7 +53,10 @@ export default function NoteItem(props) {
 
     const copyLink = (e) => {
         e.stopPropagation();
-        const url = `${window.location.origin}/share/${note._id}`;
+        const key = shareKeyHex || note?._shareKeyHex;
+        const url = key
+            ? `${window.location.origin}/share/${note._id}#${encodeURIComponent(key)}`
+            : `${window.location.origin}/share/${note._id}`;
         navigator.clipboard.writeText(url);
         setCopied(true);
         toast.success("Link copied to clipboard! 📋");
@@ -347,7 +356,7 @@ export default function NoteItem(props) {
                                             className="absolute -top-10 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white text-xs py-1 px-2 rounded opacity-0 group-hover/share:opacity-100 transition-opacity duration-200 whitespace-nowrap border border-gray-700 flex items-center gap-1 z-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:opacity-100"
                                         >
                                             {copied ? <Check className="w-3 h-3" aria-hidden="true" /> : <Copy className="w-3 h-3" aria-hidden="true" />}
-                                            {copied ? 'Copied!' : 'Copy Link'}
+                                            {copied ? 'Copied!' : (shareKeyHex || note?._shareKeyHex) ? 'Copy Link' : 'Re-share to get link'}
                                         </button>
                                     )}
                                 </div>

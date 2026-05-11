@@ -23,7 +23,7 @@ const NavigationHandler = ({ isAuthenticated, loading }) => {
 };
 
 export default function Notes() {
-    const { isAuthenticated, loading } = useAuth();
+    const { isAuthenticated, loading, needsRelogin } = useAuth();
     const context = useContext(noteContext);
     const { notes: contextNotes = [], getNotes, editNote } = context || {};
 
@@ -42,6 +42,8 @@ export default function Notes() {
     const [previewImage, setPreviewImage] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedTag, setSelectedTag] = useState('all');
+    const [saveStatus, setSaveStatus] = useState('idle'); // 'idle', 'saving', 'saved', 'error'
+    const [isAutoSaving, setIsAutoSaving] = useState(false);
 
     useEffect(() => {
         if (isAuthenticated && !loading) {
@@ -103,7 +105,9 @@ export default function Notes() {
     };
 
     const handleClick = async () => {
+        setIsAutoSaving(false); 
         try {
+            setSaveStatus('saving');
             let uploadedUrls = [];
             if (newImages.length > 0) {
                 uploadedUrls = await uploadImages(newImages);
@@ -118,6 +122,7 @@ export default function Notes() {
                 note.etag,
                 finalImages
             );
+            setSaveStatus('saved');
             setIsEditModalOpen(false);
             setExistingImages([]);
             setNewImages([]);
@@ -127,9 +132,37 @@ export default function Notes() {
             toast.success("Note updated successfully! 🎉");
         } catch (error) {
             console.error(error);
+            setSaveStatus('error');
             toast.error("Failed to update note");
         }
     };
+
+    // Autosave logic for editing
+    useEffect(() => {
+        if (!isEditModalOpen || !note.id || isAutoSaving) return;
+
+        // Skip saving if content is too short (min length 5)
+        if (note.etitle.length < 5 || note.edescription.length < 5 || note.etag.length < 2) return;
+
+        const timer = setTimeout(async () => {
+            try {
+                setSaveStatus('saving');
+                await editNote(
+                    note.id,
+                    note.etitle,
+                    note.edescription,
+                    note.etag,
+                    existingImages // Just save current images, new ones handled by manual save or upload-on-select
+                );
+                setSaveStatus('saved');
+            } catch (err) {
+                console.error("Autosave failed", err);
+                setSaveStatus('error');
+            }
+        }, 1000); // 1s debounce
+
+        return () => clearTimeout(timer);
+    }, [note.etitle, note.edescription, note.etag, isEditModalOpen, note.id, editNote, existingImages]);
 
     // Add new images
     const handleNewImageChange = (e) => {
@@ -167,12 +200,31 @@ export default function Notes() {
         );
     }
 
-    // Don't render notes if not authenticated (will be redirected)
-    if (!isAuthenticated) {
+    // Redirect normal unauthenticated users, but keep the refresh re-login prompt visible.
+    if (!isAuthenticated && !needsRelogin) {
         return (
             <Suspense fallback={null}>
                 <NavigationHandler isAuthenticated={isAuthenticated} loading={loading} />
             </Suspense>
+        );
+    }
+
+    // Master key lost after page refresh — notes cannot be decrypted until re-login
+    if (needsRelogin) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-900 p-4">
+                <div className="bg-gray-800 border border-yellow-700 rounded-2xl p-8 max-w-md w-full text-center">
+                    <div className="text-yellow-400 text-4xl mb-4">🔑</div>
+                    <h2 className="text-xl font-semibold text-white mb-2">Re-login required</h2>
+                    <p className="text-gray-400 text-sm mb-6">
+                        Your encryption key is held in memory and was cleared when the page refreshed.
+                        Please sign in again to decrypt your notes.
+                    </p>
+                    <a href="/login" className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                        Sign in again
+                    </a>
+                </div>
+            </div>
         );
     }
 
@@ -195,7 +247,37 @@ export default function Notes() {
                                 <h2 className="text-2xl font-bold text-white">
                                     Edit Note
                                 </h2>
-                                <p className="text-gray-400 text-sm mt-1">Update your note details</p>
+                                <div className="flex items-center mt-1">
+                                    <p className="text-gray-400 text-sm">Update your note details</p>
+                                    <span className="mx-2 text-gray-600">•</span>
+                                    <div className="flex items-center text-xs">
+                                        {saveStatus === 'saving' && (
+                                            <span className="text-blue-400 flex items-center">
+                                                <svg className="animate-spin h-3 w-3 mr-1" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                Saving...
+                                            </span>
+                                        )}
+                                        {saveStatus === 'saved' && (
+                                            <span className="text-green-400 flex items-center">
+                                                <svg className="h-3 w-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                                </svg>
+                                                All changes saved
+                                            </span>
+                                        )}
+                                        {saveStatus === 'error' && (
+                                            <span className="text-red-400 flex items-center">
+                                                <svg className="h-3 w-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                Save failed
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
                             </div>
                             <button
                                 onClick={() => setIsEditModalOpen(false)}
