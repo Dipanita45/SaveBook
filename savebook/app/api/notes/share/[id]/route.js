@@ -28,10 +28,20 @@ export async function PUT(request, { params }) {
             return NextResponse.json({ error: "Not authorized" }, { status: 401 });
         }
 
+        const body = await request.json().catch(() => ({}));
+
         note.isPublic = !note.isPublic;
+
+        if (note.isPublic && body.shareEncryptedContent) {
+            // Client encrypted the note with a random share key and embeds the key in the URL fragment
+            note.shareEncryptedContent = body.shareEncryptedContent;
+        } else if (!note.isPublic) {
+            note.shareEncryptedContent = null;
+        }
+
         await note.save();
 
-        return NextResponse.json(note);
+        return NextResponse.json({ isPublic: note.isPublic, _id: note._id });
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: "Server error" }, { status: 500 });

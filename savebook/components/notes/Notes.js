@@ -23,7 +23,7 @@ const NavigationHandler = ({ isAuthenticated, loading }) => {
 };
 
 export default function Notes() {
-    const { isAuthenticated, loading } = useAuth();
+    const { isAuthenticated, loading, needsRelogin } = useAuth();
     const context = useContext(noteContext);
     const { notes: contextNotes = [], getNotes, editNote } = context || {};
 
@@ -200,12 +200,31 @@ export default function Notes() {
         );
     }
 
-    // Don't render notes if not authenticated (will be redirected)
-    if (!isAuthenticated) {
+    // Redirect normal unauthenticated users, but keep the refresh re-login prompt visible.
+    if (!isAuthenticated && !needsRelogin) {
         return (
             <Suspense fallback={null}>
                 <NavigationHandler isAuthenticated={isAuthenticated} loading={loading} />
             </Suspense>
+        );
+    }
+
+    // Master key lost after page refresh — notes cannot be decrypted until re-login
+    if (needsRelogin) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-900 p-4">
+                <div className="bg-gray-800 border border-yellow-700 rounded-2xl p-8 max-w-md w-full text-center">
+                    <div className="text-yellow-400 text-4xl mb-4">🔑</div>
+                    <h2 className="text-xl font-semibold text-white mb-2">Re-login required</h2>
+                    <p className="text-gray-400 text-sm mb-6">
+                        Your encryption key is held in memory and was cleared when the page refreshed.
+                        Please sign in again to decrypt your notes.
+                    </p>
+                    <a href="/login" className="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+                        Sign in again
+                    </a>
+                </div>
+            </div>
         );
     }
 

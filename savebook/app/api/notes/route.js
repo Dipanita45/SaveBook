@@ -82,8 +82,8 @@ export async function POST(request) {
     //Create note
     const note = await Notes.create({
       user: new mongoose.Types.ObjectId(decoded.userId),
-      title: title.trim(),
-      description: description.trim(),
+      title,
+      description,
       tag: tag?.trim() || "General",
       images: Array.isArray(images) ? images : [],
       audio: audio && audio.url ? { url: audio.url, duration: audio.duration || 0 } : null,

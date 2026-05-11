@@ -45,7 +45,7 @@ export default function ForgotPasswordPage() {
       const res = await fetch("/api/auth/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: identifier }),
+        body: JSON.stringify({ email: identifier.trim() }),
       });
 
       const data = await res.json();
@@ -73,20 +73,21 @@ export default function ForgotPasswordPage() {
   const handleResetPassword = async (e) => {
     e.preventDefault();
 
-    // Method specific validations
+    const cleanIdentifier = identifier.trim();
+    const cleanRecoveryCode = recoveryCode.replace(/[^a-zA-Z0-9]/g, "").trim().toLowerCase();
+
     if (method === "otp" && !otp) {
       setMessage("OTP is required");
       setErrorType("otp");
       return;
     }
 
-    if (method === "recoveryCode" && !recoveryCode) {
+    if (method === "recoveryCode" && !cleanRecoveryCode) {
       setMessage("Recovery code is required");
       setErrorType("recoveryCode");
       return;
     }
 
-    // Shared validations
     if (password.length < 6) {
       setMessage("Password must be at least 6 characters");
       setErrorType("password");
@@ -104,15 +105,84 @@ export default function ForgotPasswordPage() {
     setErrorType("");
 
     try {
+      let newEncryptedMasterKey = null;
+
+      if (method === "recoveryCode") {
+        const mkRes = await fetch("/api/auth/master-key-for-reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: cleanIdentifier }),
+        });
+        
+        if (mkRes.ok) {
+          const mkData = await mkRes.json();
+          console.log("Master key response:", mkData);
+          if (mkData.recoveryBlobs && Array.isArray(mkData.recoveryBlobs) && mkData.recoveryBlobs.length > 0) {
+            try {
+              const { decryptWithKey, deriveKeyFromPassword, importKey, encryptMasterKey } = await import('@/lib/utils/clientCrypto');
+              
+              const blobs = mkData.recoveryBlobs;
+              console.log("Recovery attempt for userId:", mkData.userId);
+              console.log("Number of blobs to check:", blobs.length);
+              
+              let decryptedMasterKeyHex = null;
+              const wrapKey = await deriveKeyFromPassword(cleanRecoveryCode, mkData.userId);
+
+              for (let i = 0; i < blobs.length; i++) {
+                try {
+                  decryptedMasterKeyHex = await decryptWithKey(blobs[i], wrapKey);
+                  if (decryptedMasterKeyHex) {
+                    console.log("Successfully unlocked notes with recovery blob index:", i);
+                    break;
+                  }
+                } catch (e) {
+                  console.log("Failed to decrypt blob", i, ":", e.message);
+                  continue;
+                }
+              }
+
+              if (decryptedMasterKeyHex) {
+                const masterKey = await importKey(decryptedMasterKeyHex);
+                newEncryptedMasterKey = await encryptMasterKey(masterKey, password, mkData.userId);
+                console.log("Successfully created new encrypted master key");
+              } else {
+                console.error("None of the stored blobs could be decrypted.");
+                setMessage("Invalid recovery code for these notes.");
+                setErrorType("recoveryCode");
+                setLoading(false);
+                return;
+              }
+            } catch (err) {
+              console.error("Key recovery failed:", err);
+              setMessage("Technical error during recovery. Try again.");
+              setErrorType("recoveryCode");
+              setLoading(false);
+              return;
+            }
+          } else {
+            console.log("No recovery blobs found for user");
+            setMessage("Your account does not have backup recovery keys set up. Resetting will delete your notes.");
+            // We don't return here, we let them decide if they want to proceed with the deletion
+          }
+        } else {
+          console.error("Failed to fetch master key for reset:", mkRes.status);
+          setMessage("Failed to retrieve recovery information. Please try again.");
+          setErrorType("recoveryCode");
+          setLoading(false);
+          return;
+        }
+      }
+      
       const res = await fetch("/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          identifier,
+          identifier: cleanIdentifier,
           password,
           otp: method === "otp" ? otp : undefined,
-          recoveryCode: method === "recoveryCode" ? recoveryCode : undefined,
-          method
+          recoveryCode: cleanRecoveryCode,
+          method,
+          newEncryptedMasterKey,
         }),
       });
 
@@ -143,7 +213,6 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 to-blue-900 flex items-center justify-center p-4">
       <div className="max-w-md w-full">
-        {/* Header */}
         <div className="text-center mb-8">
           <h2 className="text-3xl font-extrabold text-white">
             {step === 1 ? "Reset Password" : "Set New Password"}
@@ -155,22 +224,18 @@ export default function ForgotPasswordPage() {
           </p>
         </div>
 
-        {/* Card */}
         <div className="bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700">
-
           {step === 1 && (
             <div className="mb-6 flex space-x-2 p-1 bg-gray-900 rounded-lg">
               <button
                 onClick={() => { setMethod("otp"); setErrorType(""); setMessage(""); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${method === "otp" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"
-                  }`}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${method === "otp" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"}`}
               >
                 Get OTP via Email
               </button>
               <button
                 onClick={() => { setMethod("recoveryCode"); setErrorType(""); setMessage(""); }}
-                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${method === "recoveryCode" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"
-                  }`}
+                className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${method === "recoveryCode" ? "bg-blue-600 text-white shadow-sm" : "text-gray-400 hover:text-gray-200"}`}
               >
                 Use Recovery Code
               </button>
@@ -180,21 +245,17 @@ export default function ForgotPasswordPage() {
           {step === 1 && method === "otp" && (
             <form onSubmit={handleRequestOTP} className="space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Email Address
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Email Address</label>
                 <input
                   type="email"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   required
-                  className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "identifier" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                    }`}
+                  className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "identifier" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
                   placeholder="Enter your registered email"
                   disabled={loading}
                 />
               </div>
-
               <button
                 type="submit"
                 disabled={loading}
@@ -207,36 +268,29 @@ export default function ForgotPasswordPage() {
 
           {(step === 2 || (step === 1 && method === "recoveryCode")) && (
             <form onSubmit={handleResetPassword} className="space-y-5">
-
               {method === "recoveryCode" && (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Username or Email
-                    </label>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">Username or Email</label>
                     <input
                       type="text"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
                       required
-                      className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "identifier" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                        }`}
+                      className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "identifier" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
                       placeholder="Enter your username or email"
                       disabled={loading}
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
-                      Recovery Code
-                    </label>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">Recovery Code</label>
                     <input
                       type="text"
                       value={recoveryCode}
                       onChange={(e) => setRecoveryCode(e.target.value)}
                       required
-                      className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white font-mono tracking-wider focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "recoveryCode" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                        }`}
-                      placeholder="XXXX-XXXX"
+                      className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white font-mono tracking-wider focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "recoveryCode" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
+                      placeholder="e.g. a1b2c3d4"
                       disabled={loading}
                     />
                   </div>
@@ -245,16 +299,13 @@ export default function ForgotPasswordPage() {
 
               {method === "otp" && step === 2 && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
-                    One-Time Password (OTP)
-                  </label>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">One-Time Password (OTP)</label>
                   <input
                     type="text"
                     value={otp}
                     onChange={(e) => setOtp(e.target.value.trim())}
                     required
-                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white font-mono tracking-wider focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "otp" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                      }`}
+                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white font-mono tracking-wider focus:ring-2 focus:ring-blue-500 outline-none transition-colors ${errorType === "otp" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
                     placeholder="Enter 6-digit OTP"
                     disabled={loading}
                     maxLength={6}
@@ -262,19 +313,21 @@ export default function ForgotPasswordPage() {
                 </div>
               )}
 
-              {/* New Password (Shared) */}
+              {method === "otp" && step === 2 && (
+                <div className="p-3 rounded-lg text-sm bg-yellow-900/30 text-yellow-400 border border-yellow-800">
+                  ⚠️ Resetting via OTP will permanently delete all your encrypted notes. Use a recovery code to keep them.
+                </div>
+              )}
+
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  New Password
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">New Password</label>
                 <div className="relative">
                   <input
                     type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
-                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none pr-10 transition-colors ${errorType === "password" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                      }`}
+                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none pr-10 transition-colors ${errorType === "password" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
                     placeholder="Enter new password"
                     disabled={loading}
                     minLength={6}
@@ -283,26 +336,21 @@ export default function ForgotPasswordPage() {
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 focus:outline-none"
-                    aria-label={showPassword ? "Hide password" : "Show password"}
                   >
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 </div>
               </div>
 
-              {/* Confirm Password (Shared) */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
-                  Confirm Password
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Confirm Password</label>
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? "text" : "password"}
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     required
-                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none pr-10 transition-colors ${errorType === "confirmPassword" ? "border-red-500 focus:border-red-500" : "border-gray-600"
-                      }`}
+                    className={`w-full px-4 py-3 bg-gray-700 border rounded-lg text-white focus:ring-2 focus:ring-blue-500 outline-none pr-10 transition-colors ${errorType === "confirmPassword" ? "border-red-500 focus:border-red-500" : "border-gray-600"}`}
                     placeholder="Confirm new password"
                     disabled={loading}
                     minLength={6}
@@ -311,7 +359,6 @@ export default function ForgotPasswordPage() {
                     type="button"
                     onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200 focus:outline-none"
-                    aria-label={showConfirmPassword ? "Hide password" : "Show password"}
                   >
                     {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
@@ -325,37 +372,17 @@ export default function ForgotPasswordPage() {
               >
                 {loading ? "Processing..." : "Reset Password"}
               </button>
-
-              {method === "otp" && step === 2 && (
-                <div className="text-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setStep(1)}
-                    className="text-sm text-gray-400 hover:text-white transition-colors"
-                    disabled={loading}
-                  >
-                    Didn't receive code? Resend
-                  </button>
-                </div>
-              )}
             </form>
           )}
 
           {message && (
-            <div className={`mt-4 p-3 rounded-lg text-sm text-center ${errorType === "success" ? "bg-green-900/30 text-green-400 border border-green-800" :
-                "bg-red-900/30 text-red-400 border border-red-800"
-              }`}>
+            <div className={`mt-4 p-3 rounded-lg text-sm text-center ${errorType === "success" ? "bg-green-900/30 text-green-400 border border-green-800" : "bg-red-900/30 text-red-400 border border-red-800"}`}>
               {message}
             </div>
           )}
 
           <div className="text-center mt-6">
-            <Link
-              href="/login"
-              className="text-sm text-blue-400 hover:text-blue-300 focus:outline-none focus:underline rounded-sm transition-colors"
-            >
-              Back to Login
-            </Link>
+            <Link href="/login" className="text-sm text-blue-400 hover:text-blue-300 transition-colors">Back to Login</Link>
           </div>
         </div>
       </div>

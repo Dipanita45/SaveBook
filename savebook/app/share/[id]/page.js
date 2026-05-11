@@ -17,6 +17,10 @@ export default function SharedNotePage() {
     useEffect(() => {
         const fetchNote = async () => {
             try {
+                // Share key lives in the URL fragment — never sent to the server
+                const shareKeyHex = window.location.hash.slice(1);
+                if (!shareKeyHex) throw new Error("Missing share key in URL");
+
                 const response = await fetch(`/api/public/notes/${id}`);
                 if (!response.ok) {
                     if (response.status === 404) throw new Error("Note not found");
@@ -24,7 +28,13 @@ export default function SharedNotePage() {
                     throw new Error("Failed to load note");
                 }
                 const data = await response.json();
-                setNote(data);
+
+                const { importShareKey, decryptWithKey } = await import('@/lib/utils/clientCrypto');
+                const shareKey = await importShareKey(shareKeyHex);
+                const plaintext = await decryptWithKey(data.shareEncryptedContent, shareKey);
+                const { title, description } = JSON.parse(plaintext);
+
+                setNote({ title, description, tag: data.tag, date: data.date });
             } catch (err) {
                 setError(err.message);
             } finally {
@@ -32,9 +42,7 @@ export default function SharedNotePage() {
             }
         };
 
-        if (id) {
-            fetchNote();
-        }
+        if (id) fetchNote();
     }, [id]);
 
     const customRenderers = {

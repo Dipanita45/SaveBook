@@ -57,6 +57,14 @@ const UserSchema = new Schema({
         }
     ],
 
+    // Encrypted master key blob: "{iv}:{ciphertext}" wrapped with password-derived key
+    encryptedMasterKey: {
+        type: String,
+        default: null,
+    },
+
+    // Encrypted master key blobs: wrapped with recovery code-derived key
+    recoveryBlobs: [String],
 
 });
 
@@ -78,4 +86,6 @@ UserSchema.methods.comparePassword = async function (candidatePassword) {
     return await bcrypt.compare(candidatePassword, this.password);
 };
 
-export default mongoose.models.User || mongoose.model('User', UserSchema);
+// Robust Next.js model export
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
+export default User;

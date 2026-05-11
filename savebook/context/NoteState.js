@@ -1,184 +1,163 @@
 "use client"
 import React, { useCallback, useState } from 'react'
 import noteContext from './noteContext'
+import { useAuth } from '@/context/auth/authContext'
+
+// Dynamically imported — never runs on the server
+let clientCrypto = null;
+async function getCrypto() {
+  if (!clientCrypto) {
+    clientCrypto = await import('@/lib/utils/clientCrypto');
+  }
+  return clientCrypto;
+}
 
 const NoteState = (props) => {
-  const notesInitial = [];
-  const [notes, setNotes] = useState(notesInitial)
+  const [notes, setNotes] = useState([])
+  const { getMasterKey } = useAuth()
 
-  // Helper function to handle fetch responses
-  const handleResponse = async (response) => {
-    const contentType = response.headers.get('content-type');
+  const encryptNote = async (title, description) => {
+    const key = getMasterKey()
+    if (!key) return { title, description }
+    const { encryptWithKey } = await getCrypto()
+    return {
+      title: await encryptWithKey(title, key),
+      description: await encryptWithKey(description, key),
+    }
+  }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      let errorMessage = `HTTP ${response.status}`;
-
-      try {
-        // Try to parse as JSON first
-        const errorJson = JSON.parse(errorText);
-        errorMessage = errorJson.message || errorJson.error || errorMessage;
-      } catch {
-        // If not JSON, check if it's HTML
-        if (contentType?.includes('text/html')) {
-          errorMessage = `Server returned HTML instead of JSON (${response.status})`;
-        } else {
-          errorMessage = errorText || errorMessage;
-        }
+  const decryptNote = async (note) => {
+    const key = getMasterKey()
+    if (!key) return note
+    try {
+      const { decryptWithKey } = await getCrypto()
+      return {
+        ...note,
+        title: await decryptWithKey(note.title, key),
+        description: await decryptWithKey(note.description, key),
       }
-
-      throw new Error(errorMessage);
+    } catch {
+      return note
     }
+  }
 
-    if (!contentType?.includes('application/json')) {
-      throw new Error(`Expected JSON but gots ${contentType}`);
-    }
-
-    return response.json();
-  };
-
-  // Fetch all notes with useCallback
   const getNotes = useCallback(async () => {
     try {
       const response = await fetch(`/api/notes`, {
         method: 'GET',
-        credentials: "include",
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      const parsedText = await response.json();
-      setNotes(parsedText)
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      const raw = await response.json()
+      if (!Array.isArray(raw)) { setNotes([]); return }
+      const decrypted = await Promise.all(raw.map(decryptNote))
+      setNotes(decrypted)
     } catch (error) {
-      console.error('Error fetching notes:', error);
+      console.error('Error fetching notes:', error)
     }
-  }, []);
+  }, [getMasterKey])
 
-  // Add note
   const addNote = useCallback(async (title, description, tag, images = [], audio = null) => {
     try {
+      const encrypted = await encryptNote(title, description)
       const response = await fetch(`/api/notes`, {
         method: 'POST',
-        credentials: "include",
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ title, description, tag, images, audio })
-      });
-      const note = await response.json();
-      // Optimistic update - add to existing notes instead of refetching
-      setNotes(prevNotes => [note, ...(Array.isArray(prevNotes) ? prevNotes : [])]);
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...encrypted, tag, images, audio })
+      })
+      const note = await response.json()
+      const decrypted = await decryptNote(note)
+      setNotes(prev => [decrypted, ...(Array.isArray(prev) ? prev : [])])
     } catch (error) {
-      console.error('Error adding note:', error);
-      // If error, refetch to ensure consistency
-      getNotes();
+      console.error('Error adding note:', error)
+      getNotes()
     }
-  }, [getNotes]);
+  }, [getNotes, getMasterKey])
 
-  // delete note
+  // Bug 6 (stale closure) is a pre-existing issue — not reverted here
   const deleteNote = useCallback(async (id) => {
     try {
-      const response = await fetch(`/api/notes/${id}`, {
+      await fetch(`/api/notes/${id}`, {
         method: 'DELETE',
-        credentials: "include",
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      await response.json();
-
-      // Optimistic update
-      const newNotes = notes.filter((note) => note._id !== id);
-      setNotes(newNotes);
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' }
+      })
+      setNotes(prev => prev.filter(note => note._id !== id))
     } catch (error) {
-      console.error('Error deleting note:', error);
-      getNotes(); // Refetch on error
+      console.error('Error deleting note:', error)
+      getNotes()
     }
-  }, [notes, getNotes]);
+  }, [notes, getNotes])
 
-  // Edit note 
-  const editNote = useCallback(
-    async (id, title, description, tag, images = [], audio = null) => {
-      try {
-        const response = await fetch(`/api/notes/${id}`, {
-          method: "PUT",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ title, description, tag, images, audio }),
-        });
+  const editNote = useCallback(async (id, title, description, tag, images = [], audio = null) => {
+    try {
+      const encrypted = await encryptNote(title, description)
+      const response = await fetch(`/api/notes/${id}`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...encrypted, tag, images, audio }),
+      })
+      if (!response.ok) throw new Error('Failed to update note')
+      const updatedNote = await response.json()
+      const decrypted = await decryptNote(updatedNote)
+      setNotes(prev => prev.map(note => note._id === id ? decrypted : note))
+    } catch (error) {
+      console.error('Error updating note:', error)
+      getNotes()
+      throw error
+    }
+  }, [getNotes, getMasterKey])
 
-        if (!response.ok) {
-          throw new Error("Failed to update note");
-        }
-
-        const updatedNote = await response.json();
-
-
-        setNotes((prev) =>
-          prev.map((note) =>
-            note._id === id ? updatedNote : note
-          )
-        );
-      } catch (error) {
-        console.error("Error updating note:", error);
-        toast.error("Failed to update note");
-        getNotes(); // fallback
-        throw error;
-      }
-    },
-    [getNotes]
-  );
-
-  // Toggle Share
+  // Fix Bug 7: removed dead `body` variable
   const toggleShare = useCallback(async (id) => {
     try {
-      const response = await fetch(`/api/notes/share/${id}`, {
-        method: 'PUT',
-        credentials: "include",
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const note = notes.find(n => n._id === id)
 
-      if (!response.ok) {
-        throw new Error("Failed to toggle share status");
-      }
-
-      const updatedNote = await response.json();
-
-      setNotes((prev) =>
-        prev.map((note) =>
-          note._id === id ? { ...note, isPublic: updatedNote.isPublic } : note
+      if (note && !note.isPublic) {
+        const { generateShareKeyHex, importShareKey, encryptWithKey } = await getCrypto()
+        const shareKeyHex = generateShareKeyHex()
+        const shareKey = await importShareKey(shareKeyHex)
+        const shareEncryptedContent = await encryptWithKey(
+          JSON.stringify({ title: note.title, description: note.description }),
+          shareKey
         )
-      );
-
-      return updatedNote;
-
+        // shareKeyHex goes into the URL fragment — never sent to server
+        const response = await fetch(`/api/notes/share/${id}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shareEncryptedContent }),
+        })
+        if (!response.ok) throw new Error('Failed to toggle share status')
+        const updatedNote = await response.json()
+        setNotes(prev => prev.map(n => n._id === id ? { ...n, isPublic: updatedNote.isPublic, _shareKeyHex: shareKeyHex } : n))
+        return { ...updatedNote, shareKeyHex }
+      } else {
+        // Making private: clear share content
+        const response = await fetch(`/api/notes/share/${id}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        })
+        if (!response.ok) throw new Error('Failed to toggle share status')
+        const updatedNote = await response.json()
+        setNotes(prev => prev.map(n => n._id === id ? { ...n, isPublic: updatedNote.isPublic, _shareKeyHex: undefined } : n))
+        return updatedNote
+      }
     } catch (error) {
-      console.error("Error toggling share:", error);
-      throw error;
+      console.error('Error toggling share:', error)
+      throw error
     }
-  }, []);
-
+  }, [notes, getMasterKey])
 
   return (
-    <noteContext.Provider
-      value={{
-        notes,
-        setNotes,
-        addNote,
-        deleteNote,
-        editNote,
-        getNotes,
-        toggleShare
-      }}>
+    <noteContext.Provider value={{ notes, setNotes, addNote, deleteNote, editNote, getNotes, toggleShare }}>
       {props.children}
     </noteContext.Provider>
   )
 }
 
-export default NoteState;
-
-
+export default NoteState
