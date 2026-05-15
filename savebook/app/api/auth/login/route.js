@@ -22,7 +22,7 @@ export async function POST(request) {
   );
 }
 
-    const user = await User.findOne({ username });
+    const user = await User.findOne({ username }).select("+encryptedMasterKey");
 
 const isPasswordValid = user
   ? await user.comparePassword(password)
@@ -56,6 +56,7 @@ if (!user || !isPasswordValid) {
         success: true,
         data: {
           user: {
+            id: user._id.toString(),
             username: user.username,
             profileImage: user.profileImage,
             firstName: user.firstName,
@@ -63,6 +64,7 @@ if (!user || !isPasswordValid) {
             bio: user.bio,
             location: user.location,
           },
+          encryptedMasterKey: user.encryptedMasterKey || null,
           //  only present on first login
           recoveryCodes,
         },

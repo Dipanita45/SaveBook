@@ -1,156 +1,219 @@
 "use client"
-import React, { createContext, useState, useEffect } from 'react';
+import React, { createContext, useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import AuthContext from './authContext';
 
+// Dynamically imported at call time — never runs on the server
+let clientCrypto = null;
+async function getCrypto() {
+  if (!clientCrypto) {
+    clientCrypto = await import('@/lib/utils/clientCrypto');
+  }
+  return clientCrypto;
+}
+
 const AuthProvider = ({ children }) => {
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [isAuthenticated, setIsAuthenticated] = useState(false);
-    const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // true when user is authenticated but master key was lost due to page refresh
+  const [needsRelogin, setNeedsRelogin] = useState(false);
+  const masterKeyRef = useRef(null);
+  const router = useRouter();
 
-    // Check if user is authenticated on component mount
-    useEffect(() => {
-        checkUserAuthentication();
-    }, []);
+  useEffect(() => {
+    checkUserAuthentication();
+  }, []);
 
-    // Function to check if user is authenticated
-    const checkUserAuthentication = async () => {
-        try {
-            setLoading(true);
-            // This endpoint will use the HttpOnly cookie automatically
-            const response = await fetch('/api/auth/user', {
-                method: 'GET',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                credentials: 'include', // Important: sends cookies with request
-            });
+  const clearAuthTokenCookie = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'GET', credentials: 'include' });
+    } catch {
+      // Local auth state is still invalid if the in-memory key is gone.
+    }
+  };
 
-            const data = await response.json();
-
-            if (data.success) {
-                setUser(data.user);
-                setIsAuthenticated(true);
-            } else {
-                setIsAuthenticated(false);
-                setUser(null);
-            }
-        } catch (error) {
-            console.error("Authentication check failed:", error);
-            setIsAuthenticated(false);
-            setUser(null);
-        } finally {
-            setLoading(false);
+  const checkUserAuthentication = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/auth/user', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const data = await response.json();
+      if (data.success) {
+        if (!masterKeyRef.current) {
+          await clearAuthTokenCookie();
+          masterKeyRef.current = null;
+          setUser(null);
+          setIsAuthenticated(false);
+          setNeedsRelogin(true);
+          return;
         }
-    };
 
-    // Login function
-    const login = async (username, password) => {
+        setUser(data.user);
+        setIsAuthenticated(true);
+        setNeedsRelogin(false);
+      } else {
+        setIsAuthenticated(false);
+        setUser(null);
+        masterKeyRef.current = null;
+        setNeedsRelogin(false);
+      }
+    } catch {
+      setIsAuthenticated(false);
+      setUser(null);
+      masterKeyRef.current = null;
+      setNeedsRelogin(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const login = async (username, password) => {
+    try {
+      setLoading(true);
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+        credentials: 'include',
+      });
+      const data = await response.json();
+
+      if (data.success) {
+        const userId = data.data.user.id;
+
         try {
-            setLoading(true);
-            const response = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, password }),
-                credentials: 'include' // Important: to store the cookie
+          if (data.data.encryptedMasterKey) {
+            const { decryptMasterKey } = await getCrypto();
+            masterKeyRef.current = await decryptMasterKey(data.data.encryptedMasterKey, password, userId);
+          } else {
+            const { generateMasterKey, encryptMasterKey } = await getCrypto();
+            const newMasterKey = await generateMasterKey();
+            const encryptedBlob = await encryptMasterKey(newMasterKey, password, userId);
+            masterKeyRef.current = newMasterKey;
+            await fetch('/api/auth/master-key', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({ encryptedMasterKey: encryptedBlob }),
             });
-
-            const data = await response.json();
-
-            if (data.success) {
-                setUser(data.data.user);
-                setIsAuthenticated(true);
-                return { success: true, message: data.message, recoveryCodes: data.data?.recoveryCodes || null };
-            } else {
-                return {
-                    success: false,
-                    message: data.message || "Login failed"
-                };
-            }
-        } catch (error) {
-            console.error("Login error:", error);
-            return {
-                success: false,
-                message: "An error occurred during login"
-            };
-        } finally {
-            setLoading(false);
+          }
+        } catch {
+          await clearAuthTokenCookie();
+          masterKeyRef.current = null;
+          setUser(null);
+          setIsAuthenticated(false);
+          setNeedsRelogin(false);
+          return { success: false, message: 'Unable to unlock your encrypted notes with this password' };
         }
-    };
 
-    // Register function
-    const register = async (username, email, password) => {
-        try {
-            setLoading(true);
-            const response = await fetch('/api/auth/register', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ username, email, password }),
-                credentials: 'include'
-            });
+        setUser(data.data.user);
+        setIsAuthenticated(true);
+        setNeedsRelogin(false);
+        return { success: true, message: data.message, recoveryCodes: data.data?.recoveryCodes || null };
+      }
+      return { success: false, message: data.message || 'Login failed' };
+    } catch {
+      return { success: false, message: 'An error occurred during login' };
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            const data = await response.json();
+  const register = async (username, email, password) => {
+    try {
+      setLoading(true);
 
-            if (data.success) {
-                return {
-                    success: true,
-                    message: data.message
-                }
-            } else {
-                return {
-                    success: false,
-                    message: data.message || data.error || "Registration failed"
-                };
-            }
-        } catch (error) {
-            console.error("Registration error:", error);
-            return {
-                success: false,
-                message: "An error occurred during registration"
-            };
-        } finally {
-            setLoading(false);
-        }
-    };
+      // Step 1: register without a master key first to get the userId
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, email, password }),
+        credentials: 'include',
+      });
+      const data = await response.json();
 
-    // Logout function
-    const logout = async () => {
-        try {
-            // Call logout API to clear the cookie server-side
-            await fetch('/api/auth/logout', {
-                method: 'GET',
-                credentials: 'include'
-            });
+      if (!data.success) {
+        return { success: false, message: data.message || data.error || 'Registration failed' };
+      }
 
-            setUser(null);
-            setIsAuthenticated(false);
-            router.push('/');
-        } catch (error) {
-            console.error("Logout failed:", error);
-        }
-    };
+      // Step 2: now we have the real userId — generate and wrap master key with correct salt
+      const userId = data.userId;
+      const recoveryCode = data.recoveryCodes[0]; // Use the first recovery code to wrap the key
+      const { generateMasterKey, encryptMasterKey } = await getCrypto();
+      const newMasterKey = await generateMasterKey();
+      
+      const encryptedBlob = await encryptMasterKey(newMasterKey, password, userId);
+      
+      console.log("Registering master key for userId:", userId);
+      
+      // Add a small delay to ensure DB consistency
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-    // Create the context value
-    const contextValue = {
-        user,
-        loading,
-        isAuthenticated,
-        login,
-        register,
-        logout,
-        checkUserAuthentication
-    };
+      // Step 2b: Wrap master key with EACH recovery code (Sequentially for stability)
+      const recoveryEncryptedBlobs = [];
+      for (const code of data.recoveryCodes) {
+        const blob = await encryptMasterKey(newMasterKey, code, userId);
+        recoveryEncryptedBlobs.push(blob);
+      }
 
-    return (
-        <AuthContext.Provider value={contextValue}>
-            {children}
-        </AuthContext.Provider>
-    );
+      // Step 3: save the correctly-salted encrypted master key and recovery-wrapped versions
+      const mkRegRes = await fetch('/api/auth/master-key-register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          userId, 
+          encryptedMasterKey: encryptedBlob,
+          recoveryBlobs: recoveryEncryptedBlobs 
+        }),
+      });
+
+      if (!mkRegRes.ok) {
+        const errorData = await mkRegRes.json().catch(() => ({}));
+        throw new Error(`Failed to save recovery backup keys: ${errorData.details || mkRegRes.statusText}`);
+      }
+
+      return { success: true, message: data.message, recoveryCodes: data.recoveryCodes };
+    } catch (err) {
+      console.error('Registration error:', err);
+      return { success: false, message: err?.message || 'An error occurred during registration' };
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await clearAuthTokenCookie();
+    } finally {
+      masterKeyRef.current = null;
+      setUser(null);
+      setIsAuthenticated(false);
+      setNeedsRelogin(false);
+      router.push('/');
+    }
+  };
+
+  const getMasterKey = () => masterKeyRef.current;
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      loading,
+      isAuthenticated,
+      needsRelogin,
+      login,
+      register,
+      logout,
+      checkUserAuthentication,
+      getMasterKey,
+    }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };
 
 export default AuthProvider;

@@ -8,7 +8,7 @@ export async function GET(request, { params }) {
         const { id } = await params;
         await dbConnect();
 
-        const note = await Notes.findById(id);
+        const note = await Notes.findById(id).select("isPublic shareEncryptedContent tag date");
 
         if (!note) {
             return NextResponse.json({ error: "Note not found" }, { status: 404 });
@@ -18,7 +18,15 @@ export async function GET(request, { params }) {
             return NextResponse.json({ error: "Note is private" }, { status: 403 });
         }
 
-        return NextResponse.json(note);
+        if (!note.shareEncryptedContent) {
+            return NextResponse.json({ error: "Note has no shareable content" }, { status: 404 });
+        }
+
+        return NextResponse.json({
+            shareEncryptedContent: note.shareEncryptedContent,
+            tag: note.tag,
+            date: note.date,
+        });
     } catch (error) {
         console.error(error);
         return NextResponse.json({ error: "Server error" }, { status: 500 });
